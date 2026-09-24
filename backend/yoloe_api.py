@@ -39,6 +39,16 @@ def health():
     return {"ok": True, "model": MODEL_NAME}
 
 
+@app.get("/")
+def root():
+    return {
+        "service": "Vision Counter YOLOE API",
+        "ok": True,
+        "health": "/health",
+        "analyze": "/api/analyze",
+    }
+
+
 @app.post("/api/analyze")
 async def analyze(reference: UploadFile = File(...), target: UploadFile = File(...)):
     if not reference.content_type or not reference.content_type.startswith("image/"):
