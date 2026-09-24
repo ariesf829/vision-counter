@@ -8,6 +8,27 @@ type TrainingExample = { id: number; count: number; source: string }
 const TRAINING_TARGET = 5
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://vision-counter-yoloe.onrender.com' : '')
 
+async function resizeForInference(file: File, maxDimension = 960): Promise<File> {
+  const sourceUrl = URL.createObjectURL(file)
+  try {
+    const image = new Image()
+    image.src = sourceUrl
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('Could not read the selected image'))
+    })
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Could not resize the selected image')), 'image/jpeg', 0.86))
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-inference.jpg`, { type: 'image/jpeg' })
+  } finally {
+    URL.revokeObjectURL(sourceUrl)
+  }
+}
+
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -54,27 +75,35 @@ function App() {
     setIsCameraOn(false)
   }
 
-  function loadReference(event: ChangeEvent<HTMLInputElement>) {
+  async function loadReference(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     const url = URL.createObjectURL(file)
     setReferenceUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return url })
     const image = new Image()
     image.onload = () => {
-      referenceFileRef.current = file
       setModelStatus('1 visual reference loaded')
       setMessage('Reference saved. Add a target photo or use the camera.')
     }
     image.src = url
+    try {
+      referenceFileRef.current = await resizeForInference(file)
+    } catch (resizeError) {
+      setError(resizeError instanceof Error ? resizeError.message : 'Could not prepare the reference image.')
+    }
   }
 
-  function loadTarget(event: ChangeEvent<HTMLInputElement>) {
+  async function loadTarget(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     if (isCameraOn) stopCamera()
     const url = URL.createObjectURL(file)
     setTargetUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return url })
-    targetFileRef.current = file
+    try {
+      targetFileRef.current = await resizeForInference(file)
+    } catch (resizeError) {
+      setError(resizeError instanceof Error ? resizeError.message : 'Could not prepare the target image.')
+    }
     setCount(null)
     setMessage('Target loaded. Run a visual match to count similar regions.')
   }
@@ -89,8 +118,9 @@ function App() {
       let targetFile = targetFileRef.current
       if (isCameraOn && videoRef.current) {
         const capture = document.createElement('canvas')
-        capture.width = videoRef.current.videoWidth
-        capture.height = videoRef.current.videoHeight
+        const scale = Math.min(1, 640 / Math.max(videoRef.current.videoWidth, videoRef.current.videoHeight))
+        capture.width = Math.max(1, Math.round(videoRef.current.videoWidth * scale))
+        capture.height = Math.max(1, Math.round(videoRef.current.videoHeight * scale))
         capture.getContext('2d')?.drawImage(videoRef.current, 0, 0)
         targetFile = await new Promise<File>((resolve, reject) => capture.toBlob((blob) => blob ? resolve(new File([blob], 'camera-target.jpg', { type: 'image/jpeg' })) : reject(new Error('Could not capture camera frame')), 'image/jpeg', 0.9))
         const targetObjectUrl = URL.createObjectURL(targetFile)
