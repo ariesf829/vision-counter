@@ -1,4 +1,5 @@
-import { ChangeEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import './App.css'
 
 type Detection = { x: number; y: number; width: number; height: number }
