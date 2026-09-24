@@ -6,6 +6,7 @@ type Detection = { x: number; y: number; width: number; height: number }
 type TrainingExample = { id: number; count: number; source: string }
 
 const TRAINING_TARGET = 5
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://vision-counter-yoloe.onrender.com' : '')
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -96,12 +97,12 @@ function App() {
       const form = new FormData()
       form.append('reference', referenceFileRef.current)
       form.append('target', targetFile)
-      const response = await fetch(`${import.meta.env.VITE_API_URL ?? '/api'}/analyze`, { method: 'POST', body: form })
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, { method: 'POST', body: form })
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? 'YOLOE analysis failed')
       const result = await response.json() as { detections: Detection[]; count: number }
       setDetections(result.detections)
       setCount(result.count)
-      setMessage(result.count ? `${result.count} YOLOE visual matches highlighted.` : 'YOLOE found no clear matches. Try a closer reference or lower camera angle.')
+      setMessage(result.count ? `${result.count} YOLOE visual matches highlighted.` : 'YOLOE ran successfully but found no matches. Use a tightly cropped reference with little background.')
       setModelStatus('YOLOE visual prompt active')
     } catch (analysisError) {
       setError(analysisError instanceof Error ? analysisError.message : 'Could not reach the YOLOE service.')

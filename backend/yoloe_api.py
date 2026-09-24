@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +64,7 @@ async def analyze(reference: UploadFile = File(...), target: UploadFile = File(.
         target_path.write_bytes(await target.read())
 
         try:
+            started_at = time.perf_counter()
             reference_width, reference_height = Image.open(reference_path).size
             visuals = {
                 "bboxes": [
@@ -91,6 +93,12 @@ async def analyze(reference: UploadFile = File(...), target: UploadFile = File(.
                     "height": round(((y2 - y1) / image_height) * 135, 2),
                     "confidence": round(float(confidence), 4),
                 })
-            return {"count": len(detections), "detections": detections, "model": MODEL_NAME}
+            return {
+                "count": len(detections),
+                "detections": detections,
+                "model": MODEL_NAME,
+                "confidence": CONFIDENCE,
+                "inference_ms": round((time.perf_counter() - started_at) * 1000),
+            }
         except Exception as error:
             raise HTTPException(status_code=500, detail=f"YOLOE inference failed: {error}") from error
