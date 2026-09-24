@@ -11,7 +11,7 @@ from ultralytics import YOLOE
 from ultralytics.models.yolo.yoloe.predict_vp import YOLOEVPSegPredictor
 
 MODEL_NAME = os.getenv("YOLOE_MODEL", "jameslahm/yoloe-v8s-seg")
-CONFIDENCE = float(os.getenv("YOLOE_CONFIDENCE", "0.15"))
+CONFIDENCE = float(os.getenv("YOLOE_CONFIDENCE", "0.05"))
 ALLOWED_ORIGINS = os.getenv(
     "VISION_COUNTER_ORIGINS",
     "http://localhost:5173,https://ariesf829.github.io",
@@ -66,9 +66,11 @@ async def analyze(reference: UploadFile = File(...), target: UploadFile = File(.
         try:
             started_at = time.perf_counter()
             reference_width, reference_height = Image.open(reference_path).size
+            inset_x = reference_width * 0.05
+            inset_y = reference_height * 0.05
             visuals = {
                 "bboxes": [
-                    np.array([[0, 0, reference_width, reference_height]], dtype=np.float32)
+                    np.array([[inset_x, inset_y, reference_width - inset_x, reference_height - inset_y]], dtype=np.float32)
                 ],
                 "cls": [np.array([0], dtype=np.int64)],
             }
@@ -87,10 +89,10 @@ async def analyze(reference: UploadFile = File(...), target: UploadFile = File(.
             for box, confidence in zip(boxes, confidences):
                 x1, y1, x2, y2 = box.tolist()
                 detections.append({
-                    "x": round((x1 / image_width) * 240, 2),
-                    "y": round((y1 / image_height) * 135, 2),
-                    "width": round(((x2 - x1) / image_width) * 240, 2),
-                    "height": round(((y2 - y1) / image_height) * 135, 2),
+                    "x": round(x1 / image_width, 4),
+                    "y": round(y1 / image_height, 4),
+                    "width": round((x2 - x1) / image_width, 4),
+                    "height": round((y2 - y1) / image_height, 4),
                     "confidence": round(float(confidence), 4),
                 })
             return {
