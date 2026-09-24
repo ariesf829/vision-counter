@@ -14,3 +14,5 @@ footer { display: flex; justify-content: space-between; margin-top: 22px; color:
 .has-result .camera-feed { display: none; }
 .has-result .target-image { display: block; }
 .has-result .result-canvas { display: none; }
+.live-camera .camera-feed { display: block; }
+.live-camera .target-image { display: none; }

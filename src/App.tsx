@@ -15,6 +15,7 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null)
   const referenceFileRef = useRef<File | null>(null)
   const targetFileRef = useRef<File | null>(null)
+  const analysisBusyRef = useRef(false)
   const [referenceUrl, setReferenceUrl] = useState('')
   const [targetUrl, setTargetUrl] = useState('')
   const [isCameraOn, setIsCameraOn] = useState(false)
@@ -79,7 +80,9 @@ function App() {
   }
 
   async function analyzeFrame() {
+    if (analysisBusyRef.current) return
     if (!referenceFileRef.current) { setError('Add a reference photo first so the app knows what to count.'); return }
+    analysisBusyRef.current = true
     setIsAnalyzing(true)
     setError('')
     try {
@@ -107,9 +110,16 @@ function App() {
     } catch (analysisError) {
       setError(analysisError instanceof Error ? analysisError.message : 'Could not reach the YOLOE service.')
     } finally {
+      analysisBusyRef.current = false
       setIsAnalyzing(false)
     }
   }
+
+  useEffect(() => {
+    if (!isCameraOn || !referenceUrl) return undefined
+    const interval = window.setInterval(() => { void analyzeFrame() }, 1500)
+    return () => window.clearInterval(interval)
+  }, [isCameraOn, referenceUrl])
 
   function addCorrection() {
     const value = Number(correctedCount)
@@ -134,7 +144,7 @@ function App() {
         <div className="capture-panel">
           <div className="panel-heading"><div><span className="step-number">01</span><h2>Teach the object</h2></div><span className="live-label"><span className="status-dot active" /> {modelStatus}</span></div>
           <div className="reference-drop"><div className="reference-copy"><span className="mini-label">visual reference</span><strong>{referenceUrl ? 'Reference loaded' : 'Upload one clear example'}</strong><span>{referenceUrl ? 'YOLOE uses the centered object region as its prompt.' : 'Crop tightly: one object, minimal background.'}</span></div>{referenceUrl ? <img src={referenceUrl} className="reference-image" alt="Visual reference" /> : <label className="upload-button" htmlFor="reference-upload">Choose photo</label>}<input id="reference-upload" type="file" accept="image/*" onChange={loadReference} /></div>
-          <div className={`camera-stage ${hasTarget ? 'camera-active' : ''} ${count !== null ? 'has-result' : ''}`}><video ref={videoRef} className="camera-feed" playsInline muted aria-label="Live target camera preview" />{targetUrl && <img ref={targetImageRef} src={targetUrl} className="target-image" alt="Target to analyze" />}<canvas ref={canvasRef} className="result-canvas" aria-label="Analyzed target frame" />{!hasTarget && <div className="camera-empty"><div className="camera-glyph">+</div><strong>Target image</strong><span>Upload a group or use the camera</span></div>}{count !== null && detections.map((detection, index) => <span className="detection-box" key={`${detection.x}-${detection.y}`} style={{ left: `${detection.x * 100}%`, top: `${detection.y * 100}%`, width: `${detection.width * 100}%`, height: `${detection.height * 100}%` }}><b>{index + 1}</b></span>)}<div className="crosshair horizontal" /><div className="crosshair vertical" /></div>
+          <div className={`camera-stage ${hasTarget ? 'camera-active' : ''} ${count !== null ? 'has-result' : ''} ${isCameraOn ? 'live-camera' : ''}`}><video ref={videoRef} className="camera-feed" playsInline muted aria-label="Live target camera preview" />{targetUrl && <img ref={targetImageRef} src={targetUrl} className="target-image" alt="Target to analyze" />}<canvas ref={canvasRef} className="result-canvas" aria-label="Analyzed target frame" />{!hasTarget && <div className="camera-empty"><div className="camera-glyph">+</div><strong>Target image</strong><span>Upload a group or use the camera</span></div>}{count !== null && detections.map((detection, index) => <span className="detection-box" key={`${detection.x}-${detection.y}`} style={{ left: `${detection.x * 100}%`, top: `${detection.y * 100}%`, width: `${detection.width * 100}%`, height: `${detection.height * 100}%` }}><b>{index + 1}</b></span>)}<div className="crosshair horizontal" /><div className="crosshair vertical" /></div>
           <div className="controls"><button className="button secondary" type="button" onClick={isCameraOn ? stopCamera : startCamera}>{isCameraOn ? 'Stop camera' : 'Use camera'}</button><label className="button secondary file-button" htmlFor="target-upload">Upload target</label><input id="target-upload" type="file" accept="image/*" onChange={loadTarget} /><button className="button primary" type="button" onClick={analyzeFrame} disabled={!hasTarget || !referenceUrl || isAnalyzing}>{isAnalyzing ? 'Matching...' : 'Match & count'}</button></div>
           {error && <p className="error-message">{error}</p>}<div className="result-message"><span className="message-mark">i</span><p>{message}</p></div>
         </div>
