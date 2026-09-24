@@ -3,27 +3,19 @@ import type { ChangeEvent } from 'react'
 import './App.css'
 
 type Detection = { x: number; y: number; width: number; height: number }
-type VisualSignature = { brightness: number }
 type TrainingExample = { id: number; count: number; source: string }
 
 const TRAINING_TARGET = 5
 
-function getSignature(context: CanvasRenderingContext2D, width: number, height: number): VisualSignature {
-  const pixels = context.getImageData(0, 0, width, height).data
-  let brightness = 0
-  for (let index = 0; index < pixels.length; index += 4) brightness += (pixels[index] * 299 + pixels[index + 1] * 587 + pixels[index + 2] * 114) / 1000
-  return { brightness: brightness / (pixels.length / 4) }
-}
-
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const signatureCanvasRef = useRef<HTMLCanvasElement>(null)
   const targetImageRef = useRef<HTMLImageElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const referenceFileRef = useRef<File | null>(null)
+  const targetFileRef = useRef<File | null>(null)
   const [referenceUrl, setReferenceUrl] = useState('')
   const [targetUrl, setTargetUrl] = useState('')
-  const [referenceSignature, setReferenceSignature] = useState<VisualSignature | null>(null)
   const [isCameraOn, setIsCameraOn] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [count, setCount] = useState<number | null>(null)
@@ -67,13 +59,7 @@ function App() {
     setReferenceUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return url })
     const image = new Image()
     image.onload = () => {
-      const canvas = signatureCanvasRef.current
-      const context = canvas?.getContext('2d', { willReadFrequently: true })
-      if (!canvas || !context) return
-      canvas.width = 80
-      canvas.height = 80
-      context.drawImage(image, 0, 0, 80, 80)
-      setReferenceSignature(getSignature(context, 80, 80))
+      referenceFileRef.current = file
       setModelStatus('1 visual reference loaded')
       setMessage('Reference saved. Add a target photo or use the camera.')
     }
@@ -86,64 +72,42 @@ function App() {
     if (isCameraOn) stopCamera()
     const url = URL.createObjectURL(file)
     setTargetUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return url })
+    targetFileRef.current = file
     setCount(null)
     setMessage('Target loaded. Run a visual match to count similar regions.')
   }
 
-  function analyzeSource(source: CanvasImageSource, sourceWidth: number, sourceHeight: number) {
-    const canvas = canvasRef.current
-    if (!canvas) return
+  async function analyzeFrame() {
+    if (!referenceFileRef.current) { setError('Add a reference photo first so the app knows what to count.'); return }
     setIsAnalyzing(true)
-    const width = 240
-    const height = Math.max(1, Math.round((sourceHeight / sourceWidth) * width))
-    canvas.width = width
-    canvas.height = height
-    const context = canvas.getContext('2d', { willReadFrequently: true })
-    if (!context) return
-    context.drawImage(source, 0, 0, width, height)
-    const pixels = context.getImageData(0, 0, width, height).data
-    const referenceBrightness = referenceSignature?.brightness ?? 100
-    const values: number[] = []
-    for (let index = 0; index < pixels.length; index += 4) values.push((pixels[index] * 299 + pixels[index + 1] * 587 + pixels[index + 2] * 114) / 1000)
-    const sorted = [...values].sort((a, b) => a - b)
-    const floorTone = sorted[Math.floor(sorted.length * 0.55)]
-    const threshold = Math.min(190, Math.max(42, floorTone - 20 - Math.abs(referenceBrightness - floorTone) * 0.08))
-    const visited = new Uint8Array(values.length)
-    const regions: Detection[] = []
-    const neighbors = [-1, 0, 1]
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const start = y * width + x
-        if (visited[start] || values[start] > threshold) continue
-        visited[start] = 1
-        const queue = [start]
-        let minX = x; let maxX = x; let minY = y; let maxY = y; let area = 0
-        while (queue.length) {
-          const current = queue.pop() as number
-          const currentX = current % width
-          const currentY = Math.floor(current / width)
-          area += 1; minX = Math.min(minX, currentX); maxX = Math.max(maxX, currentX); minY = Math.min(minY, currentY); maxY = Math.max(maxY, currentY)
-          neighbors.forEach((offsetY) => neighbors.forEach((offsetX) => {
-            const nextX = currentX + offsetX; const nextY = currentY + offsetY; const next = nextY * width + nextX
-            if (nextX > 0 && nextX < width - 1 && nextY > 0 && nextY < height - 1 && !visited[next] && values[next] <= threshold) { visited[next] = 1; queue.push(next) }
-          }))
-        }
-        const regionWidth = maxX - minX + 1
-        const regionHeight = maxY - minY + 1
-        if (area >= 6 && area <= width * height * 0.18 && Math.max(regionWidth, regionHeight) >= 5) regions.push({ x: minX, y: minY, width: regionWidth, height: regionHeight })
+    setError('')
+    try {
+      let targetFile = targetFileRef.current
+      if (isCameraOn && videoRef.current) {
+        const capture = document.createElement('canvas')
+        capture.width = videoRef.current.videoWidth
+        capture.height = videoRef.current.videoHeight
+        capture.getContext('2d')?.drawImage(videoRef.current, 0, 0)
+        targetFile = await new Promise<File>((resolve, reject) => capture.toBlob((blob) => blob ? resolve(new File([blob], 'camera-target.jpg', { type: 'image/jpeg' })) : reject(new Error('Could not capture camera frame')), 'image/jpeg', 0.9))
+        const targetObjectUrl = URL.createObjectURL(targetFile)
+        setTargetUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return targetObjectUrl })
       }
+      if (!targetFile) throw new Error('Add a target image or start the camera first.')
+      const form = new FormData()
+      form.append('reference', referenceFileRef.current)
+      form.append('target', targetFile)
+      const response = await fetch(`${import.meta.env.VITE_API_URL ?? '/api'}/analyze`, { method: 'POST', body: form })
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? 'YOLOE analysis failed')
+      const result = await response.json() as { detections: Detection[]; count: number }
+      setDetections(result.detections)
+      setCount(result.count)
+      setMessage(result.count ? `${result.count} YOLOE visual matches highlighted.` : 'YOLOE found no clear matches. Try a closer reference or lower camera angle.')
+      setModelStatus('YOLOE visual prompt active')
+    } catch (analysisError) {
+      setError(analysisError instanceof Error ? analysisError.message : 'Could not reach the YOLOE service.')
+    } finally {
+      setIsAnalyzing(false)
     }
-    const filtered = regions.filter((region, index) => !regions.some((other, otherIndex) => otherIndex !== index && other.x <= region.x && other.y <= region.y && other.x + other.width >= region.x + region.width && other.y + other.height >= region.y + region.height))
-    setDetections(filtered)
-    setCount(filtered.length)
-    setMessage(filtered.length ? `${filtered.length} visually similar region${filtered.length === 1 ? '' : 's'} highlighted.` : 'No clear matches found. Try a closer reference or better lighting.')
-    setIsAnalyzing(false)
-  }
-
-  function analyzeFrame() {
-    if (!referenceSignature) { setError('Add a reference photo first so the app knows what to count.'); return }
-    if (isCameraOn && videoRef.current && videoRef.current.readyState >= 2) analyzeSource(videoRef.current, videoRef.current.videoWidth, videoRef.current.videoHeight)
-    else if (targetImageRef.current?.complete) analyzeSource(targetImageRef.current, targetImageRef.current.naturalWidth, targetImageRef.current.naturalHeight)
   }
 
   function addCorrection() {
@@ -175,7 +139,7 @@ function App() {
         </div>
         <aside className="result-panel"><div className="panel-heading"><div><span className="step-number">02</span><h2>Correct & improve</h2></div><span className="result-tag">{examples.length}/{TRAINING_TARGET} examples</span></div><div className="count-display"><span className="count-label">estimated count</span><strong>{count ?? '—'}</strong><span className="count-object">reference-guided result</span></div><div className="correction-box"><label htmlFor="corrected-count">Actual count, if different</label><div className="correction-row"><input id="corrected-count" inputMode="numeric" value={correctedCount} onChange={(event) => setCorrectedCount(event.target.value)} placeholder="e.g. 12" /><button className="button primary" type="button" onClick={addCorrection} disabled={!correctedCount}>Save correction</button></div></div><div className="example-list"><span className="tips-title">Correction ledger</span>{examples.length === 0 ? <span className="empty-ledger">No corrections saved yet.</span> : examples.slice(-3).map((example) => <span key={example.id}>✓ {example.count} objects / {example.source}</span>)}</div><button className="train-button" type="button" onClick={improveModel} disabled={examples.length < TRAINING_TARGET || isTraining}>{isTraining ? 'Improving profile...' : examples.length < TRAINING_TARGET ? `Add ${TRAINING_TARGET - examples.length} more correction${TRAINING_TARGET - examples.length === 1 ? '' : 's'}` : 'Improve this model'}</button><p className="training-note">This prototype records corrected examples locally. A production version can send this ledger to a training job for YOLOE or a custom detector.</p></aside>
       </section>
-      <footer><span>Visual prompting first.</span><span>Training becomes available after {TRAINING_TARGET} corrections.</span></footer><canvas ref={signatureCanvasRef} className="hidden-canvas" />
+      <footer><span>YOLOE visual prompting.</span><span>Training becomes available after {TRAINING_TARGET} corrections.</span></footer>
     </main>
   )
 }

@@ -1,5 +1,23 @@
 # React + TypeScript + Vite
 
+## YOLOE setup
+
+The browser UI uses the Python service in [`backend`](backend) for YOLOE visual-prompt inference. Run both processes locally:
+
+```powershell
+cd backend
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+uvicorn yoloe_api:app --reload --host 0.0.0.0 --port 8000
+```
+
+In another terminal, run the frontend with `npm run dev`. Vite proxies `/api` to port 8000. The first YOLOE request downloads the pretrained weights, so it can take a while and needs a machine with enough RAM. CPU works for testing; CUDA is recommended.
+
+For GitHub Pages, deploy the backend separately over HTTPS and create a repository variable named `VITE_API_URL` under **Settings > Secrets and variables > Actions > Variables**. Set it to the backend origin, for example `https://your-yoloe-service.example.com`. Add `https://ariesf829.github.io` to the backend's `VISION_COUNTER_ORIGINS` value.
+
+The official YOLOE code and weights are AGPL-3.0. Review that license before public or commercial deployment.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:
